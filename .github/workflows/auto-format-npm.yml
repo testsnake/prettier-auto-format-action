@@ -1,0 +1,91 @@
+name: Auto-Format (npm)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "git reference for the checkout action"
+        required: true
+        type: string
+      node-version:
+        description: "Node.js version"
+        required: true
+        type: string
+      runs-on:
+        description: "The type of runner to use"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      commit-message:
+        description: "Commit message"
+        required: false
+        type: string
+        default: "[AUTO] Apply code formatting"
+      file-pattern:
+        description: "File pattern to commit"
+        required: false
+        type: string
+        default: "src/**/*.*"
+      fetch-depth:
+        description: "The depth of commits to fetch"
+        required: false
+        type: number
+        default: 0
+
+jobs:
+  format-and-commit:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Reset and Clean Working Directory
+        run: |
+          git fetch origin ${{ inputs.ref }}
+          git reset --hard FETCH_HEAD
+          git clean -fdx
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Prettier
+        run: npm run format
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          if git diff --exit-code; then
+            echo "::set-output name=changes::false"
+          else
+            echo "::set-output name=changes::true"
+          fi
+
+      - name: No changes to commit
+        if: steps.git-check.outputs.changes == 'false'
+        run: |
+          echo "No changes detected. Exiting..."
+          exit 0
+            
+      - name: Commit and Push changes
+        if: steps.git-check.outputs.changes == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+            commit_message: ${{ inputs.commit-message }}
+            branch: ${{ inputs.ref }}
+            file_pattern: ${{ inputs.file-pattern }}
